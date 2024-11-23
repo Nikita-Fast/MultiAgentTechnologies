@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import numpy as np
 import spade
@@ -9,6 +10,8 @@ from spade.template import Template
 from adj_matrix import ADJ_MATRIX
 import json
 
+AGENT_STARTED = {}
+
 
 class MyAgent(Agent):
     def __init__(self, id: int, number: float | int, N: int):
@@ -16,6 +19,8 @@ class MyAgent(Agent):
         self.id = id
         self.number = number
         self.array = [None] * N
+        self.N = N
+        self.local_mean = None
         jid = MyAgent.id_to_jid(id)
         super().__init__(jid, "Nikitafast1404")
 
@@ -55,18 +60,20 @@ class MyAgent(Agent):
             super().__init__()
 
         async def on_start(self):
-            print("Starting SendReceiveNumbersBehav behaviour . . .")
+            AGENT_STARTED[self.agent.id - 1] = 1
+            while len(AGENT_STARTED.keys()) < self.agent.N:
+                await asyncio.sleep(0)
+            print(f"[{self.agent.id}] Starting SendReceiveNumbersBehav behaviour . . .")
 
         async def run(self):
-            # ждем пока все агенты запустятся
-            await asyncio.sleep(5)
             # пока в массиве есть хотя бы один None
             if np.sum(np.array(self.agent.array) == None) > 0:
                 await self._send_numbers()
                 await self._receive_numbers()
             else:
                 self.kill(exit_code=228)
-                print(f"[Agent{self.agent.id}] Done! Mean={np.mean(self.agent.array)}")
+                self.agent.local_mean = np.mean(self.agent.array)
+                print(f"[Agent{self.agent.id}] Done!")
 
         async def _send_numbers(self):
             agent: MyAgent = self.agent
@@ -134,6 +141,10 @@ async def main():
 
     for agent in agents:
         await agent.stop()
+
+    print("-----------------------------")
+    for agent in agents:
+        print(f"[Agent{agent.id}] answer = {agent.local_mean}")
 
     print(f"Control answer = {np.mean(numbers)}")
 
