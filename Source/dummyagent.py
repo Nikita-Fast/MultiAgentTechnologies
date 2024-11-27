@@ -3,15 +3,15 @@ import time
 
 import numpy as np
 import spade
+from cffi.model import unknown_type
 from spade.agent import Agent
-from spade.behaviour import CyclicBehaviour
+from spade.behaviour import CyclicBehaviour, OneShotBehaviour
 from spade.message import Message
 from spade.template import Template
 from adj_matrix import ADJ_MATRIX
 import json
 
 AGENT_STARTED = {}
-AGENT_DONE = {}
 
 
 class MyAgent(Agent):
@@ -39,11 +39,23 @@ class MyAgent(Agent):
         print(f"[{self.id}] Agent started!")
         self._init()
 
-        behav = self.SendReceiveNumbersBehav()
-        self.behav = behav
-        template = Template()
-        template.set_metadata("performative", "inform")
-        self.add_behaviour(behav, template)
+        # behav = self.SendReceiveNumbersBehav()
+        # self.behav = behav
+        # template = Template()
+        # template.set_metadata("performative", "inform")
+        # self.add_behaviour(behav, template)
+
+        b1 = self.SendNumbersBehav()
+        t1 = Template()
+        t1.set_metadata("performative", "request_nums")
+        self.add_behaviour(b1, t1)
+
+        b2 = self.RequestReceiveNumbersBehav()
+        t2 = Template()
+        t2.set_metadata("performative", "response_nums")
+        self.add_behaviour(b2, t2)
+
+        self.request_receive_behav = b2
 
     @staticmethod
     def id_to_jid(id: int):
@@ -56,76 +68,97 @@ class MyAgent(Agent):
         }
         return agent_id_to_jid[id]
 
-    class SendReceiveNumbersBehav(CyclicBehaviour):
-        def __init__(self):
-            super().__init__()
+    class SendNumbersBehav(OneShotBehaviour):
 
-        async def on_start(self):
-            self.agent.finished = False
-            self.agent.iter_cnt = 0
-            self.agent.msg_sent_cnt = 0
-            self.agent.msg_recv_cnt = 0
-            AGENT_STARTED[self.agent.id - 1] = 1
-            while len(AGENT_STARTED.keys()) < self.agent.N:
-                await asyncio.sleep(0)
-            print(f"[{self.agent.id}] Starting SendReceiveNumbersBehav behaviour . . .")
-
-        async def run(self):
-            if (not self.agent.finished) and (np.sum(np.array(self.agent.array) == None) == 0):
-                self.agent.finished = True
-                AGENT_DONE[self.agent.id - 1] = 1
-
-            # пока в массиве есть хотя бы один None
-            if np.sum(np.array(self.agent.array) == None) > 0 or len(AGENT_DONE.keys()) < self.agent.N:
-                self.agent.iter_cnt += 1
-                await self._send_numbers()
-                await self._receive_numbers()
-            else:
-                print(f"AGENT_DONE={AGENT_DONE}")
-                self.kill(exit_code=228)
-                self.agent.local_mean = np.mean(self.agent.array)
-                print(f"[Agent{self.agent.id}] Done in {self.agent.iter_cnt} iterations! Msg tx {self.agent.msg_sent_cnt}, Msg rx {self.agent.msg_recv_cnt}")
-
-        async def _send_numbers(self):
-            agent: MyAgent = self.agent
-
-            for neighbour_id in agent.neighbours:
-                self.agent.msg_sent_cnt += 1
-                await self._send_msg(dst_id=neighbour_id, payload=(agent.id, agent.array))
-
-        async def _receive_numbers(self):
-            agent: MyAgent = self.agent
-
-            cnt = 0
-            for _ in agent.neighbours:
-                msg = await self.receive(timeout=5)
-                self.agent.msg_recv_cnt += 1
-                if msg:
-                    cnt += 1
-                    print(f"[{agent.id}] Ответ от соседа: {msg.body}")
-                    j, array = json.loads(msg.body)
-                    self._update_local_array(array)
-
-            if cnt != len(agent.neighbours):
-                print("Error agent", self.agent.id, self.agent.array)
-                raise RuntimeError("Не все соседи прислали свои числа!")
-
-        async def _send_msg(self, dst_id, payload):
+        async def _send_msg(self, dst_id, payload, mark):
             neighbour_jid = MyAgent.id_to_jid(dst_id)
             msg = Message(to=neighbour_jid)
-            msg.set_metadata("performative", "inform")
+            msg.set_metadata("performative", mark)
             msg.body = json.dumps(payload)
 
             print(f"[{self.agent.id}] -> [{dst_id}] data={msg.body}")
             await self.send(msg)
+            self.agent.response_cnt += 1
 
-        def _update_local_array(self, neighbour_array):
-            for (i, N_i) in enumerate(neighbour_array):
-                if (self.agent.array[i] is None) and (N_i is not None):
-                    self.agent.array[i] = N_i
+        async def on_start(self) -> None:
+            self.agent.response_cnt = 0
+
+        async def run(self) -> None:
+            agent: MyAgent = self.agent
+
+            while True:
+                while self.mailbox_size() == 0:
+                    # print(f"[{self.agent.id}]: SendNumbersBehav wait request")
+                    await asyncio.sleep(0)
+                print(f"[{self.agent.id}] SendNumbersBehav behaviour . . .")
+
+                msg = await self.receive(timeout=5)
+                request_agent_id, unknown_nums_idx = json.loads(msg.body)
+
+                numbers = {i: self.agent.array[i] for i in unknown_nums_idx if self.agent.array[i] is not None}
+                await self._send_msg(request_agent_id, (self.agent.id, numbers), "response_nums")
+
+
+    class RequestReceiveNumbersBehav(CyclicBehaviour):
+        def __init__(self):
+            super().__init__()
+            self.collected_all_numbers = False
+
+        async def on_start(self):
+            self.agent.iter_cnt = 0
+            self.agent.request_cnt = 0
+            AGENT_STARTED[self.agent.id - 1] = 1
+            while len(AGENT_STARTED.keys()) < self.agent.N:
+                await asyncio.sleep(0)
+            print(f"[{self.agent.id}] Starting RequestReceiveNumbersBehav behaviour . . .")
+
+        async def run(self):
+            agent: MyAgent = self.agent
+            self.agent.iter_cnt += 1
+
+            unknown_nums_idx = [i for i,v in enumerate(self.agent.array) if v is None]
+            for neighbour_id in agent.neighbours:
+                await self._send_msg(dst_id=neighbour_id, payload=(agent.id, unknown_nums_idx), mark="request_nums")
+
+            cnt = 0
+            for neighbour_id in agent.neighbours:
+                msg = await self.receive(timeout=5)
+                if msg:
+                    cnt += 1
+                    print(f"[{agent.id}] Ответ от агента-соседа {neighbour_id}: {msg.body}")
+                    j, _dict = json.loads(msg.body)
+                    self._update_local_array(_dict)
+
+            if cnt != len(agent.neighbours):
+                raise RuntimeError(f"[{self.agent.id}] Не все соседи прислали свои числа!")
+
+            if np.sum(np.array(self.agent.array) == None) == 0:
+                self.collected_all_numbers = True
+                print(f"Agent [{self.agent.id}]: все числа собраны")
+                self.agent.local_mean = np.mean(self.agent.array)
+                self.kill(exit_code=228)
+
+        async def _send_msg(self, dst_id, payload, mark):
+            neighbour_jid = MyAgent.id_to_jid(dst_id)
+            msg = Message(to=neighbour_jid)
+            msg.set_metadata("performative", mark)
+            msg.body = json.dumps(payload)
+
+            print(f"[{self.agent.id}] -> [{dst_id}] data={msg.body}")
+            await self.send(msg)
+            self.agent.request_cnt += 1
+
+        def _update_local_array(self, _dict: dict):
+            for k, v in _dict.items():
+                if v is None:
+                    raise RuntimeError(f"[{self.agent.id}]: Передали вместо числа None")
+                self.agent.array[int(k)] = v
 
 
 async def main():
+    if not np.all(np.transpose(ADJ_MATRIX) == ADJ_MATRIX):
+        raise RuntimeError("Матрицы смежности должна быть симметрична!")
+
     N = 5
     numbers = [4.5, 2.1, -7.3, 1.2, 3.9]
 
@@ -143,14 +176,14 @@ async def main():
     agent1.web.start(hostname="127.0.0.1", port="10000")
     agent2.web.start(hostname="127.0.0.1", port="10001")
 
-    while not agent1.behav.is_killed():
+    while not all(agent.request_receive_behav.is_killed() for agent in agents):
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
         except KeyboardInterrupt:
             break
 
     for agent in agents:
-        if agent.behav.exit_code != 228:
+        if agent.request_receive_behav.exit_code != 228:
             raise RuntimeError(f"Agent{agent.id} завершился с неправильным статус кодом")
 
     for agent in agents:
@@ -158,12 +191,11 @@ async def main():
 
     print("-----------------------------")
     for agent in agents:
-        print(f"[Agent{agent.id}] answer = {agent.local_mean}")
+        print(f"[Agent{agent.id}] mean = {agent.local_mean}, iter_n={agent.iter_cnt}, request_n={agent.request_cnt}, response_n={agent.response_cnt}")
 
-    print(f"Control answer = {np.mean(numbers)}")
+    print(f"Control mean = {np.mean(numbers)}")
 
 
 if __name__ == "__main__":
     spade.run(main())
-
 
