@@ -1,9 +1,7 @@
 import asyncio
-import time
 
 import numpy as np
 import spade
-from cffi.model import unknown_type
 from spade.agent import Agent
 from spade.behaviour import CyclicBehaviour, OneShotBehaviour
 from spade.message import Message
