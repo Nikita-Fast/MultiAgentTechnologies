@@ -60,6 +60,9 @@ class MyAgent(Agent):
             super().__init__()
 
         async def on_start(self):
+            self.agent.iter_cnt = 0
+            self.agent.msg_sent_cnt = 0
+            self.agent.msg_recv_cnt = 0
             AGENT_STARTED[self.agent.id - 1] = 1
             while len(AGENT_STARTED.keys()) < self.agent.N:
                 await asyncio.sleep(0)
@@ -68,17 +71,19 @@ class MyAgent(Agent):
         async def run(self):
             # пока в массиве есть хотя бы один None
             if np.sum(np.array(self.agent.array) == None) > 0:
+                self.agent.iter_cnt += 1
                 await self._send_numbers()
                 await self._receive_numbers()
             else:
                 self.kill(exit_code=228)
                 self.agent.local_mean = np.mean(self.agent.array)
-                print(f"[Agent{self.agent.id}] Done!")
+                print(f"[Agent{self.agent.id}] Done in {self.agent.iter_cnt} iterations! Msg tx {self.agent.msg_sent_cnt}, Msg rx {self.agent.msg_recv_cnt}")
 
         async def _send_numbers(self):
             agent: MyAgent = self.agent
 
             for neighbour_id in agent.neighbours:
+                self.agent.msg_sent_cnt += 1
                 await self._send_msg(dst_id=neighbour_id, payload=(agent.id, agent.array))
 
         async def _receive_numbers(self):
@@ -87,6 +92,7 @@ class MyAgent(Agent):
             cnt = 0
             for _ in agent.neighbours:
                 msg = await self.receive(timeout=5)
+                self.agent.msg_recv_cnt += 1
                 if msg:
                     cnt += 1
                     print(f"[{agent.id}] Ответ от соседа: {msg.body}")
