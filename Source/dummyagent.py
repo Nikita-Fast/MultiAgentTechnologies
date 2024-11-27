@@ -11,6 +11,7 @@ from adj_matrix import ADJ_MATRIX
 import json
 
 AGENT_STARTED = {}
+AGENT_DONE = {}
 
 
 class MyAgent(Agent):
@@ -60,6 +61,7 @@ class MyAgent(Agent):
             super().__init__()
 
         async def on_start(self):
+            self.agent.finished = False
             self.agent.iter_cnt = 0
             self.agent.msg_sent_cnt = 0
             self.agent.msg_recv_cnt = 0
@@ -69,12 +71,17 @@ class MyAgent(Agent):
             print(f"[{self.agent.id}] Starting SendReceiveNumbersBehav behaviour . . .")
 
         async def run(self):
+            if (not self.agent.finished) and (np.sum(np.array(self.agent.array) == None) == 0):
+                self.agent.finished = True
+                AGENT_DONE[self.agent.id - 1] = 1
+
             # пока в массиве есть хотя бы один None
-            if np.sum(np.array(self.agent.array) == None) > 0:
+            if np.sum(np.array(self.agent.array) == None) > 0 or len(AGENT_DONE.keys()) < self.agent.N:
                 self.agent.iter_cnt += 1
                 await self._send_numbers()
                 await self._receive_numbers()
             else:
+                print(f"AGENT_DONE={AGENT_DONE}")
                 self.kill(exit_code=228)
                 self.agent.local_mean = np.mean(self.agent.array)
                 print(f"[Agent{self.agent.id}] Done in {self.agent.iter_cnt} iterations! Msg tx {self.agent.msg_sent_cnt}, Msg rx {self.agent.msg_recv_cnt}")
@@ -100,6 +107,7 @@ class MyAgent(Agent):
                     self._update_local_array(array)
 
             if cnt != len(agent.neighbours):
+                print("Error agent", self.agent.id, self.agent.array)
                 raise RuntimeError("Не все соседи прислали свои числа!")
 
         async def _send_msg(self, dst_id, payload):
