@@ -56,7 +56,9 @@ class MyAgent(Agent):
 
     class RequestReceiveNumbersBehav(CyclicBehaviour):
         # На каждой итерации агент спрашивает у соседей неизвестные ему числа.
-        # Для этого агент отправляет сообщение (agent_id, unknown_nums_idx)
+        # Для этого агент отправляет сообщение вида (agent_id, unknown_nums_idx).
+        # После этого агент ожидает ответ от каждого из своих соседей.
+        # Итерации этого поведения продолжаются пока агент не узнает все числа.
 
         async def on_start(self):
             self.agent.iter_cnt = 0
@@ -108,6 +110,9 @@ class MyAgent(Agent):
                 self.agent.array[int(k)] = v
 
     class SendNumbersBehav(OneShotBehaviour):
+        # Агент получает от соседа запрос значений неизвестных чисел.
+        # Агент проверяет какие из этих чисел он знает.
+        # Агент отправляет известные числа соседу.
 
         async def _send_msg(self, dst_id, payload, mark):
             neighbour_jid = MyAgent.id_to_jid(dst_id)
