@@ -14,6 +14,8 @@ import json
 AGENT_STARTED = {}
 agent_values = {}
 
+ALPHA = 1/10
+
 
 xuixui = dict()
 send_event = asyncio.Event()
@@ -49,11 +51,19 @@ async def block_agents():
         await asyncio.sleep(0)
 
 
+async def print_results():
+    while True:
+        print(agent_values)
+        await asyncio.sleep(0.5)
+
+
 class MyAgent(Agent):
     def __init__(self, id: int, number: float | int, N: int):
         self.neighbours: list[int] = None
         self.id = id
         self._init(id, number, N)
+        self.correction = 0
+        self.iter_cnt = 0
         jid = MyAgent.id_to_jid(id)
 
         super().__init__(jid, "Nikitafast1404")
@@ -85,7 +95,7 @@ class MyAgent(Agent):
     async def setup(self):
         print(f"[{self.id}] Agent started!")
 
-        b1 = self.RecvBehav()
+        b1 = self.Recv2Behav()
         self.add_behaviour(b1)
 
         b2 = self.SendBehav()
@@ -125,22 +135,44 @@ class MyAgent(Agent):
             agent: MyAgent = self.agent
 
             while True:
-                print(f"[{self.agent.id}]: START ITER {self.agent.iter_cnt}")
+                if agent.correction != 0:
+                    x_i = agent.get_number(agent.id)
+                    agent.set_number(agent.id, x_i + agent.correction)
+                    agent_values[agent.id] = x_i + agent.correction
+                    # print(f"[{self.agent.id}]: CUR VAL = {agent.get_number(agent.id)}")
+                    agent.correction = 0
+
                 for neighbour_id in agent.neighbours:
                     neighbour_id = int(neighbour_id)
                     p = agent.get_connection_probability(neighbour_id)
-                    has_connection = random.choices([1, 0], weights=[p, 1-p])[0]
-                    # has_connection = True
+                    has_connection = random.random() < p
+                    has_connection = True
                     if has_connection:
                         value = agent.get_number(agent.id)
                         noise = np.random.normal(0, 0.1, 1)[0]
-                        # noise = 0
+                        noise = 0
                         await self._send_msg(dst_id=neighbour_id, payload=(agent.id, value + noise), mark="MARK_SEND")
                     else:
                         pass
                         print(f"[{self.agent.id}] -> [{neighbour_id}] no connection")
-                await send_event.wait()
+                await asyncio.sleep(0.05)
+                print(self.agent.iter_cnt)
+                self.agent.iter_cnt += 1
 
+    class Recv2Behav(CyclicBehaviour):
+        async def run(self):
+            agent: MyAgent = self.agent
+
+            # получяем числа от агентов соседей
+            msg = await self.receive(timeout=5)
+            if msg:
+                j, x_j = json.loads(msg.body)
+                agent.set_number(j, x_j)
+
+                x_i = agent.get_number(agent.id)
+                agent.correction += ALPHA * (x_j - x_i)
+            else:
+                print(f"[{self.agent.id}] do not get value")
 
     class RecvBehav(CyclicBehaviour):
         async def on_start(self):
@@ -165,7 +197,6 @@ class MyAgent(Agent):
             # Если текущее значение соседа не поступило, то будет использовано предыдущее
             x_i = agent.get_number(agent.id)
             alpha = 1/10
-            _sum = 0
             vals = [agent.get_number(j) for j in agent.neighbours]
             vals = [x for x in vals if x is not None]
 
@@ -183,8 +214,8 @@ class MyAgent(Agent):
 
 
 async def main():
-    if not np.all(np.transpose(ADJ_MATRIX) == ADJ_MATRIX):
-        raise RuntimeError("Матрицы смежности должна быть симметрична!")
+    # if not np.all(np.transpose(ADJ_MATRIX) == ADJ_MATRIX):
+    #     raise RuntimeError("Матрицы смежности должна быть симметрична!")
 
     N = 5
     numbers = [1000, 2000, 3321, 4000, 5000]
@@ -199,13 +230,13 @@ async def main():
 
     agents = [agent1, agent2, agent3, agent4, agent5]
 
-    block_agents._ideal_mean = np.mean(numbers)
+    # block_agents._ideal_mean = np.mean(numbers)
 
     for agent in agents:
         await agent.start()
 
-    await block_agents()
-
+    # await block_agents()
+    await print_results()
 
     agent1.web.start(hostname="127.0.0.1", port="10000")
     agent2.web.start(hostname="127.0.0.1", port="10001")
