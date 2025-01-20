@@ -1,2 +1,3 @@
 spade
 numpy
+matplotlib
