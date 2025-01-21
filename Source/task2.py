@@ -1,76 +1,86 @@
 import asyncio
 import random
+import matplotlib
+matplotlib.use('QtAgg')
+import matplotlib.pyplot as plt
 
 import numpy as np
 import spade
-from matplotlib import pyplot as plt
 from spade.agent import Agent
-from spade.behaviour import CyclicBehaviour, OneShotBehaviour
+from spade.behaviour import CyclicBehaviour
 from spade.message import Message
 from spade.template import Template
 from adj_matrix import ADJ_MATRIX
 import json
 
-AGENT_STARTED = {}
 agent_values = {}
+ITER_NUM = 100
 
-ALPHA = 1/10
+phase1_event = asyncio.Event()
+PHASE1_STARTED = {}
+async def sync_phase1_start():
+    while True:
+        if len(PHASE1_STARTED.keys()) == 5:
+            PHASE1_STARTED.clear()
+            phase2_event.clear()
+            phase1_event.set()
+        await asyncio.sleep(0)
+
+phase2_event = asyncio.Event()
+PHASE2_STARTED = {}
+async def sync_phase2_start():
+    while True:
+        if len(PHASE2_STARTED.keys()) == 5:
+            PHASE2_STARTED.clear()
+            phase1_event.clear()
+            phase2_event.set()
+        await asyncio.sleep(0)
 
 
-xuixui = dict()
-send_event = asyncio.Event()
-recv_event = asyncio.Event()
+async def sync_phase12():
+    while not sync_phase12.done :
+        if len(PHASE1_STARTED.keys()) == 5:
+            plt.ion()
+            _plot()
+            PHASE1_STARTED.clear()
+            phase2_event.clear()
+            phase1_event.set()
+        if len(PHASE2_STARTED.keys()) == 5:
+            PHASE2_STARTED.clear()
+            phase1_event.clear()
+            phase2_event.set()
+        await asyncio.sleep(0)
+
+sync_phase12.done = False
+
+ALPHA = 1/30
 
 
 def _plot():
     data = list(zip(*agent_values.values()))
-    print("agents vals std", np.std(data[-1]))
-    print("agent 1 and ideal value diff", block_agents._ideal_mean - data[-1][0])
 
     plt.clf()
-    plt.axhline(y=block_agents._ideal_mean, color='r', linestyle='-')
+    plt.axhline(y=_plot._ideal_mean, color='r', linestyle='-')
     plt.plot(data)
     plt.draw()
     plt.pause(0.001)
 
-
-async def block_agents():
-    plt.ion()
-    while True:
-        if len(xuixui.keys()) == 5:
-            print("**************** ALL AGENTS DONE ITERATION ****************")
-            plt.ion()
-            _plot()
-            xuixui.clear()
-
-            recv_event.set()
-            recv_event.clear()
-
-            send_event.set()
-            send_event.clear()
-        await asyncio.sleep(0)
-
-
-async def print_results():
-    while True:
-        print(agent_values)
-        await asyncio.sleep(0.5)
 
 
 class MyAgent(Agent):
     def __init__(self, id: int, number: float | int, N: int):
         self.neighbours: list[int] = None
         self.id = id
+        self.phase = 1
+        self.iteration = 0
         self._init(id, number, N)
-        self.correction = 0
-        self.iter_cnt = 0
         jid = MyAgent.id_to_jid(id)
 
         super().__init__(jid, "Nikitafast1404")
 
     def _init(self, id, number, N):
         # +-1 т.к. id агентов от 1 до N, а индексы массива от 0 до N-1
-        self.array = [None] * N
+        self.array = np.array([number] * N, dtype=float)
         self.array[self.id - 1] = number
         self._set_neighbours()
         print(f"[{self.id}] neighbours={self.neighbours}")
@@ -95,10 +105,7 @@ class MyAgent(Agent):
     async def setup(self):
         print(f"[{self.id}] Agent started!")
 
-        b1 = self.Recv2Behav()
-        self.add_behaviour(b1)
-
-        b2 = self.SendBehav()
+        b2 = self.ComboBehav()
         t2 = Template()
         t2.set_metadata("performative", "MARK_SEND")
         self.add_behaviour(b2, t2)
@@ -109,116 +116,88 @@ class MyAgent(Agent):
     def id_to_jid(id: int):
         return f"nikita_agent{id}@07f.de"
 
-    class SendBehav(CyclicBehaviour):
 
-        async def on_start(self):
-            print(f"[{self.agent.id}] start SendBehav")
-            AGENT_STARTED[self.agent.id - 1] = 1
-            agents_number = len(self.agent.array)
-            while len(AGENT_STARTED.keys()) < agents_number:
-                await asyncio.sleep(0)
+    class ComboBehav(CyclicBehaviour):
+        async def on_start(self) -> None:
+            agent_values[self.agent.id] = []
 
         async def _send_msg(self, dst_id, payload, mark):
             neighbour_jid = MyAgent.id_to_jid(dst_id)
             msg = Message(to=neighbour_jid)
             msg.set_metadata("performative", mark)
             msg.body = json.dumps(payload)
-
-            # print(f"[{self.agent.id}] -> [{dst_id}] data={msg.body}")
             await self.send(msg)
 
-        async def run(self) -> None:
-            # На каждой итерации отправляем всем соседям свое значение
-            # Значение при передачи складывается с шумом
-            # Связь с соседями может эпизодически исчезать
+        async def send_to_neighbours(self):
+            for neighbour_id in self.agent.neighbours:
+                neighbour_id = int(neighbour_id)
+                p = self.agent.get_connection_probability(neighbour_id)
+                has_connection = random.choices([1, 0], weights=[p, 1 - p])[0]
+                # has_connection = True
+                if has_connection:
+                    value = self.agent.get_number(self.agent.id)
+                    noise = np.random.normal(0, 0.1, 1)[0]
+                    await self._send_msg(dst_id=neighbour_id, payload=(self.agent.id, value + noise), mark="MARK_SEND")
+                else:
+                    pass
+                    print(f"[{self.agent.id}] -> [{neighbour_id}] no connection")
 
-            agent: MyAgent = self.agent
-
-            while True:
-                if agent.correction != 0:
-                    x_i = agent.get_number(agent.id)
-                    agent.set_number(agent.id, x_i + agent.correction)
-                    agent_values[agent.id] = x_i + agent.correction
-                    # print(f"[{self.agent.id}]: CUR VAL = {agent.get_number(agent.id)}")
-                    agent.correction = 0
-
-                for neighbour_id in agent.neighbours:
-                    neighbour_id = int(neighbour_id)
-                    p = agent.get_connection_probability(neighbour_id)
-                    has_connection = random.random() < p
-                    has_connection = True
-                    if has_connection:
-                        value = agent.get_number(agent.id)
-                        noise = np.random.normal(0, 0.1, 1)[0]
-                        noise = 0
-                        await self._send_msg(dst_id=neighbour_id, payload=(agent.id, value + noise), mark="MARK_SEND")
-                    else:
-                        pass
-                        print(f"[{self.agent.id}] -> [{neighbour_id}] no connection")
-                await asyncio.sleep(0.05)
-                print(self.agent.iter_cnt)
-                self.agent.iter_cnt += 1
-
-    class Recv2Behav(CyclicBehaviour):
-        async def run(self):
-            agent: MyAgent = self.agent
-
-            # получяем числа от агентов соседей
-            msg = await self.receive(timeout=5)
-            if msg:
-                j, x_j = json.loads(msg.body)
-                agent.set_number(j, x_j)
-
-                x_i = agent.get_number(agent.id)
-                agent.correction += ALPHA * (x_j - x_i)
-            else:
-                print(f"[{self.agent.id}] do not get value")
-
-    class RecvBehav(CyclicBehaviour):
-        async def on_start(self):
-            self.agent.iter_cnt = 0
-            agent_values[self.agent.id] = []
-
-        async def run(self):
-            print(f"[{self.agent.id}] start RecvBehav")
-            agent: MyAgent = self.agent
-
-            # получяем числа от агентов соседей
-            for _ in agent.neighbours:
-                msg = await self.receive(timeout=5)
+        async def recv_from_neighbours(self):
+            n_values = []
+            for _ in self.agent.neighbours:
+                msg = await self.receive()
                 if msg:
                     j, x_j = json.loads(msg.body)
-                    print(f"[{agent.id}] Получено значение от агента соседа {j}: {x_j}")
-                    agent.set_number(j, x_j)
+                    self.agent.set_number(j, x_j)
+                    n_values.append(x_j)
                 else:
-                    print(f"[{self.agent.id}] do not get value")
+                    print(f"[{self.agent.id}] missed value")
+            if len(n_values) < len(self.agent.neighbours):
+                pass
+                print(f"recv {len(n_values)} / {len(self.agent.neighbours)}")
 
-            # расчитываем собственное значение, используя Local Voting Protocol
-            # Если текущее значение соседа не поступило, то будет использовано предыдущее
-            x_i = agent.get_number(agent.id)
-            alpha = 1/10
-            vals = [agent.get_number(j) for j in agent.neighbours]
-            vals = [x for x in vals if x is not None]
+            i = self.agent.id
+            x_i = self.agent.get_number(i)
+            _change = 0
+            for j in self.agent.neighbours:
+                x_j = self.agent.get_number(j)
+                _change += ALPHA * (x_j - x_i)
+            x_i_new = x_i + _change
+            # if self.agent.id == 5:
+            #     print("agent5:", self.agent.array, x_i, _change, x_i_new)
+            self.agent.set_number(i, x_i_new)
+            agent_values[i].append(x_i_new)
 
-            x_i = x_i + alpha * np.sum(np.array(vals) - x_i)
-            agent.set_number(agent.id, x_i)
+        async def run(self):
+            match self.agent.phase:
+                case 1:
+                    PHASE1_STARTED[self.agent.id] = 1
+                    await phase1_event.wait()
 
-            agent_values[self.agent.id].append(x_i)
+                    if self.agent.iteration < ITER_NUM:
+                        await self.send_to_neighbours()
+                        self.agent.phase = 2
+                    else:
+                        self.agent.phase = 3
+                case 2:
+                    PHASE2_STARTED[self.agent.id] = 1
+                    await phase2_event.wait()
 
-            print(f"[{self.agent.id}]: FINISH ITER {self.agent.iter_cnt}, CUR VAL = {agent.get_number(agent.id)}")
+                    await self.recv_from_neighbours()
+                    self.agent.phase = 1
+                    self.agent.iteration += 1
+                case _:
+                    print(f"agent {self.agent.id} res:", self.agent.get_number(self.agent.id))
+                    sync_phase12.done = True
+                    self.kill(228)
 
-            xuixui[self.agent.id] = self.agent.iter_cnt
-
-            self.agent.iter_cnt += 1
-            await recv_event.wait()
 
 
 async def main():
-    # if not np.all(np.transpose(ADJ_MATRIX) == ADJ_MATRIX):
-    #     raise RuntimeError("Матрицы смежности должна быть симметрична!")
-
     N = 5
-    numbers = [1000, 2000, 3321, 4000, 5000]
+    # numbers = [1, 20, 40, 60, 105]
+    # numbers = [8,22,15,5,0]
+    numbers = [-7592, 1465, 9977, -37289, 8754]
 
     agent1 = MyAgent(1, numbers[0], N)
     agent2 = MyAgent(2, numbers[1], N)
@@ -230,16 +209,12 @@ async def main():
 
     agents = [agent1, agent2, agent3, agent4, agent5]
 
-    # block_agents._ideal_mean = np.mean(numbers)
+    _plot._ideal_mean = np.mean(numbers)
 
     for agent in agents:
         await agent.start()
 
-    # await block_agents()
-    await print_results()
-
-    agent1.web.start(hostname="127.0.0.1", port="10000")
-    agent2.web.start(hostname="127.0.0.1", port="10001")
+    await sync_phase12()
 
     while not all(agent.RecvBehav.is_killed() for agent in agents):
         try:
@@ -254,12 +229,16 @@ async def main():
     for agent in agents:
         await agent.stop()
 
-    print("-----------------------------")
-    for agent in agents:
-        print(
-            f"[Agent{agent.id}] mean = {agent.local_mean}, iter_n={agent.iter_cnt}, request_n={agent.request_cnt}, response_n={agent.response_cnt}")
+    data = list(zip(*agent_values.values()))
+    _std = np.std(data[-1])
+    _dist = np.abs(data[-1][0] - _plot._ideal_mean)
+    print("            std(agents values) =", _std)
+    print("abs( agent1_val - ideal_mean ) =", _dist)
 
-    print(f"Control mean = {np.mean(numbers)}")
+    plt.ioff()
+    _plot()
+    plt.show()
+
 
 
 if __name__ == "__main__":

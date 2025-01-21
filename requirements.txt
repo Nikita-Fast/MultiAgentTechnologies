@@ -1,3 +1,5 @@
 spade
 numpy
 matplotlib
+pyqt5
+pyqt6

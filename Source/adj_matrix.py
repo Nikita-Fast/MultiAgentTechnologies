@@ -1,26 +1,26 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-#
-ADJ_MATRIX = np.array([
-    [0, 0.95, 1, 0, 0],
-    [1, 0, 0, 0, 0],
-    [0.93, 0, 0, 1, 0.83],
-    [0, 0, 0.81, 0, 1],
-    [0, 0, 1, 1, 0],
-])
-
 
 # ADJ_MATRIX = np.array([
-#     [0,   0.95,  0,    1,    1],
-#     [0.95, 0,    1,    0,    0],
-#     [0,   1,    0,    1, 0],
-#     [1,   0,    1, 0,    1],
-#     [1,   0,    0,    1,    0],
+#     [0, 1, 0, 1, 1],
+#     [1, 0, 1, 0, 0],
+#     [0, 1, 0, 1, 0],
+#     [1, 0, 1, 0, 1],
+#     [1, 0, 0, 1, 0],
 # ])
 
-# ADJ_MATRIX = np.array([[0, 1, 0, 0, 0], [1, 0, 1, 0, 0], [0, 1, 0, 1, 0], [0, 0, 1, 0, 1], [0, 0, 0, 1, 0]])
 
+ADJ_MATRIX = np.array([
+    [0,   0.95,  0,    1,    1],
+    [0.91, 0,    1,    0,    0],
+    [0,   1,    0,    0.87, 0],
+    [1,   0,    0.97, 0,    1],
+    [1,   0,    0,    1,    0],
+])
+
+# ADJ_MATRIX = np.array([[0, 1, 0, 0, 0], [1, 0, 1, 0, 0], [0, 1, 0, 1, 0], [0, 0, 1, 0, 1], [0, 0, 0, 1, 0]])
+#
 # ADJ_MATRIX = np.array([
 #     [0, 1, 1, 0, 1],
 #     [1, 0, 0, 0, 0],
@@ -31,9 +31,10 @@ ADJ_MATRIX = np.array([
 
 
 if __name__ == '__main__':
-    from scipy.sparse.csgraph import laplacian
-    from scipy.sparse import diags
-    from scipy import linalg
+    # from scipy.sparse.csgraph import laplacian
+    # from scipy.sparse import diags
+    # from scipy import linalg
+
 
     A = np.array([
         [0, 0, 0, 1, 1],
@@ -61,4 +62,3 @@ if __name__ == '__main__':
 
     plt.plot(np.real(ev_real_abs), '*')
     plt.show()
-
