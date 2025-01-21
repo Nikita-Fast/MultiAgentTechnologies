@@ -1,7 +1,14 @@
 import asyncio
 import random
+import sys
 import matplotlib
-matplotlib.use('QtAgg')
+
+DISABLE_ITER_MATPLOTLIB = False
+
+if sys.version_info.minor <= 10:
+    matplotlib.use('Qt5Agg')
+else:
+    matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -38,10 +45,11 @@ async def sync_phase2_start():
 
 
 async def sync_phase12():
-    while not sync_phase12.done :
+    while not sync_phase12.done:
         if len(PHASE1_STARTED.keys()) == 5:
-            plt.ion()
-            _plot()
+            if not DISABLE_ITER_MATPLOTLIB:
+                plt.ion()
+                _plot()
             PHASE1_STARTED.clear()
             phase2_event.clear()
             phase1_event.set()
