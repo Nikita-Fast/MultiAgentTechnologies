@@ -4,6 +4,7 @@ import sys
 import matplotlib
 
 DISABLE_ITER_MATPLOTLIB = False
+DISABLE_PLOTTING = False
 
 if sys.version_info.minor <= 10:
     matplotlib.use('Qt5Agg')
@@ -65,13 +66,14 @@ ALPHA = 1/30
 
 
 def _plot():
-    data = list(zip(*agent_values.values()))
+    if not DISABLE_PLOTTING:
+        data = list(zip(*agent_values.values()))
 
-    plt.clf()
-    plt.axhline(y=_plot._ideal_mean, color='r', linestyle='-')
-    plt.plot(data)
-    plt.draw()
-    plt.pause(0.001)
+        plt.clf()
+        plt.axhline(y=_plot._ideal_mean, color='r', linestyle='-')
+        plt.plot(data)
+        plt.draw()
+        plt.pause(0.001)
 
 
 
